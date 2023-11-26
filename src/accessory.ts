@@ -1,12 +1,8 @@
-import {
-  AccessoryPlugin,
-  API,
-  Logger,
-} from 'homebridge';
-import storage from 'node-persist';
-import GPIO from 'rpi-gpio';
-import {AccessoryConfig} from 'homebridge/lib/bridgeService';
-import axios from 'axios';
+import { AccessoryPlugin, API, Logger } from "homebridge";
+import storage from "node-persist";
+import GPIO from "rpi-gpio";
+import { AccessoryConfig } from "homebridge/lib/bridgeService";
+import axios from "axios";
 
 /**
  * HomebridgePlatform
@@ -22,35 +18,41 @@ export class GpioDoorbellAccessory implements AccessoryPlugin {
 
   private lastRang?: number;
 
-  private readonly doorbellMuteKey = 'homebridge-gpio-doorbell.mute';
+  private readonly doorbellMuteKey = "homebridge-gpio-doorbell.mute";
   private doorbellMute: boolean;
+  private lastPinChangeDate?: number;
+  private currentPinValue?: boolean;
 
   constructor(
     public readonly log: Logger,
     public readonly config: AccessoryConfig,
-    public readonly api: API,
+    public readonly api: API
   ) {
-    this.log.debug('Homebridge GPIO Doorbell loaded.');
+    this.log.debug("Homebridge GPIO Doorbell loaded.");
 
     // init storage
     const cacheDir = this.api.user.persistPath();
     this.storage = storage.create();
-    this.storage.initSync({dir: cacheDir, forgiveParseErrors: true});
+    this.storage.initSync({ dir: cacheDir, forgiveParseErrors: true });
 
     // add accessory information
     this.informationService = new this.api.hap.Service.AccessoryInformation()
-      .setCharacteristic(this.api.hap.Characteristic.Manufacturer, 'Homebridge')
-      .setCharacteristic(this.api.hap.Characteristic.Model, 'GPIO Doorbell');
+      .setCharacteristic(this.api.hap.Characteristic.Manufacturer, "Homebridge")
+      .setCharacteristic(this.api.hap.Characteristic.Model, "GPIO Doorbell");
 
     // create new doorbell accessory
     this.doorbellService = new this.api.hap.Service.Doorbell(this.config.name);
 
     // add characteristic ProgrammableSwitchEvent
-    this.doorbellService.getCharacteristic(this.api.hap.Characteristic.ProgrammableSwitchEvent);
+    this.doorbellService.getCharacteristic(
+      this.api.hap.Characteristic.ProgrammableSwitchEvent
+    );
 
     // setup mute characteristic
     if (this.config.enableOutput) {
-      this.muteCharacteristic = this.doorbellService.getCharacteristic(this.api.hap.Characteristic.Mute);
+      this.muteCharacteristic = this.doorbellService.getCharacteristic(
+        this.api.hap.Characteristic.Mute
+      );
       this.muteCharacteristic.onGet(this.handleMuteGet.bind(this));
       this.muteCharacteristic.onSet(this.handleMuteSet.bind(this));
     }
@@ -58,22 +60,23 @@ export class GpioDoorbellAccessory implements AccessoryPlugin {
     // restore persisted settings
     this.doorbellMute = this.storage.getItemSync(this.doorbellMuteKey) || false;
     this.storage.setItemSync(this.doorbellMuteKey, this.doorbellMute);
-    this.doorbellService.updateCharacteristic(this.api.hap.Characteristic.Mute, this.doorbellMute as boolean);
+    this.doorbellService.updateCharacteristic(
+      this.api.hap.Characteristic.Mute,
+      this.doorbellMute as boolean
+    );
 
     // setup gpio
     this.setupGpio();
   }
 
   getServices() {
-    return [
-      this.informationService,
-      this.doorbellService,
-    ];
+    return [this.informationService, this.doorbellService];
   }
 
   setupGpio(): void {
-    GPIO.on('change', (channel, value) => this.handlePinChange(channel, value));
+    GPIO.on("change", (channel, value) => this.handlePinChange(channel, value));
     GPIO.setup(this.config.gpioPin, GPIO.DIR_IN, GPIO.EDGE_BOTH);
+    this.currentPinValue = GPIO.read(this.config.gpioPin);
 
     if (this.config.enableOutput) {
       this.log.debug(`Enable output on pin ${this.config.outputGpioPin}`);
@@ -87,58 +90,110 @@ export class GpioDoorbellAccessory implements AccessoryPlugin {
    * @param circuitOpen true when circuit is open, false if circuit is closed
    * @private
    */
-  private async handlePinChange(gpioPin: number, circuitOpen: boolean): Promise<void> {
-    this.log.debug(`Pin ${gpioPin} changed state to ${circuitOpen}.`);
+  private async handlePinChange(
+    gpioPin: number,
+    circuitOpen: boolean
+  ): Promise<void> {
+    // We get the date of the last pin change
+    this.lastPinChangeDate = Date.now();
 
-    let buttonPushed = !circuitOpen;
+    this.log.debug(
+      `Pin ${gpioPin} changed state to ${circuitOpen}.` +
+        ` Invoking in a 100ms processChange with identifier ${this.lastPinChangeDate}`
+    );
 
-    if (this.config.negateInput) {
-      buttonPushed = !buttonPushed;
-    }
+    // To prevent glitches, we make delayed call with a change identifier (based on timestamp)
+    // If a change has been observed before scheduled call has been invoked, it will do nothing, and a new
+    // call will be scheduled.
+    setTimeout(
+      (gpioPin, changeTimeStamp) => {
+        if (this.lastPinChangeDate != changeTimeStamp) {
+          // Ignore if it is not the change identifier: there has been other pin changes in the while.
+          this.log.debug(
+            `Ignore processing because this is not the last change processing request.`
+          );
+          return;
+        }
 
-    // handle GPIO output
-    if (this.config.enableOutput && !this.doorbellMute) {
-      this.log.debug(`Setting GPIO pin ${this.config.outputGpioPin} to ${buttonPushed ? 'HIGH' : 'LOW'}`);
+        // Is it an actual change?
+        let currentValue = GPIO.read(gpioPin);
+        if (currentValue == this.currentPinValue) {
+          this.log.debug(
+            `Ignore processing because ${currentValue} does not differ from last processed value ${this.currentPinValue}.`
+          );
+          return;
+        }
 
-      GPIO.write(this.config.outputGpioPin, buttonPushed);
-    }
+        // We can process the change
+        this.currentPinValue = currentValue;
 
-    if (buttonPushed) {
-      // handle throttle time
-      const now = Date.now();
-      if (this.lastRang && (this.lastRang + this.config.throttleTime) >= now) {
-        this.log.debug(`Ignoring state change on pin ${gpioPin} because throttle time has not expired.`);
-        return;
-      } else {
-        this.lastRang = Date.now();
-      }
+        let buttonPushed = !currentValue;
 
-      // forward ring to homekit
-      this.log.info(`Doorbell "${this.config.name}" rang.`);
+        if (this.config.negateInput) {
+          buttonPushed = !buttonPushed;
+        }
 
-      if (!this.config.enableHttpTrigger || !this.config.httpTriggerUrl) {
-        // ring in homekit
-        this.log.info('Forwarding ring directly to HomeKit.');
-        this.doorbellService.updateCharacteristic(
-          this.api.hap.Characteristic.ProgrammableSwitchEvent,
-          this.api.hap.Characteristic.ProgrammableSwitchEvent.SINGLE_PRESS,
-        );
-      } else {
-        // ring via 3rd party plugin
-        const url = this.config.httpTriggerUrl;
-        this.log.info(`Performing request to webhook at ${url}.`);
-        try {
-          await axios.get(url);
-        /* eslint-disable  @typescript-eslint/no-explicit-any */
-        } catch (e: any) {
-          if (e.response) {
-            this.log.error(`Request to webhook failed with status code ${e.response.status}: ${e.response.data}`);
+        // handle GPIO output
+        if (this.config.enableOutput && !this.doorbellMute) {
+          this.log.debug(
+            `Setting GPIO pin ${this.config.outputGpioPin} to ${
+              buttonPushed ? "HIGH" : "LOW"
+            }`
+          );
+
+          GPIO.write(this.config.outputGpioPin, buttonPushed);
+        }
+
+        if (buttonPushed) {
+          // handle throttle time
+          const now = Date.now();
+          if (
+            this.lastRang &&
+            this.lastRang + this.config.throttleTime >= now
+          ) {
+            this.log.debug(
+              `Ignoring state change on pin ${gpioPin} because throttle time has not expired.`
+            );
+            return;
           } else {
-            this.log.error(`Request to webhook failed with message: ${e?.message}`);
+            this.lastRang = Date.now();
+          }
+
+          // forward ring to homekit
+          this.log.info(`Doorbell "${this.config.name}" rang.`);
+
+          if (!this.config.enableHttpTrigger || !this.config.httpTriggerUrl) {
+            // ring in homekit
+            this.log.info("Forwarding ring directly to HomeKit.");
+            this.doorbellService.updateCharacteristic(
+              this.api.hap.Characteristic.ProgrammableSwitchEvent,
+              this.api.hap.Characteristic.ProgrammableSwitchEvent.SINGLE_PRESS
+            );
+          } else {
+            // ring via 3rd party plugin
+            const url = this.config.httpTriggerUrl;
+            this.log.info(`Performing request to webhook at ${url}.`);
+            try {
+              await axios.get(url);
+              /* eslint-disable  @typescript-eslint/no-explicit-any */
+            } catch (e: any) {
+              if (e.response) {
+                this.log.error(
+                  `Request to webhook failed with status code ${e.response.status}: ${e.response.data}`
+                );
+              } else {
+                this.log.error(
+                  `Request to webhook failed with message: ${e?.message}`
+                );
+              }
+            }
           }
         }
-      }
-    }
+      },
+      this.config.glitchTime,
+      gpioPin,
+      this.lastPinChangeDate
+    );
   }
 
   private handleMuteSet(value: boolean): void {
@@ -153,7 +208,7 @@ export class GpioDoorbellAccessory implements AccessoryPlugin {
   }
 
   private handleMuteGet(): boolean {
-    this.log.debug('Get mute.');
+    this.log.debug("Get mute.");
     return this.doorbellMute;
   }
 }

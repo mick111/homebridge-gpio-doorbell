@@ -27,6 +27,7 @@ Alternatively you can use this plugin to trigger a doorbell exposed by [homebrid
 | name | string | The name of the accessory. | 
 | gpioPin | integer | The GPIO pin the plugin should listen to. | 
 | throttleTime | integer | How many milliseconds should another ring be ignored after the doorbell rang last? | 
+| glitchTime | integer | How many milliseconds a change must remain stable for not being considered as a glitch? | 
 | reverseInput | boolean | If enabled, a high input on the gpio pin is interpreted as low and the other way around. |
 | enableOutput | boolean | If enabled, a doorbell ring causes a specified GPIO pin to be set HIGH simultaneously. |
 | outputGpioPin | integer | The output GPIO pin. |
