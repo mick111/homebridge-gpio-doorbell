@@ -6,4 +6,4 @@ export const ACCESSORY_NAME = 'GpioDoorbell';
 /**
  * This must match the name of your plugin as defined the package.json
  */
-export const PLUGIN_NAME = 'homebridge-gpio-doorbell';
+export const PLUGIN_NAME = 'homebridge-gpio-doorbell-mick111';
