@@ -3,9 +3,6 @@ import storage from 'node-persist';
 import GPIO from 'rpi-gpio';
 import { AccessoryConfig } from 'homebridge/lib/bridgeService';
 import axios from 'axios';
-import { promisify } from 'util';
-
-const readPromise = promisify(GPIO.read);
 
 /**
  * HomebridgePlatform
@@ -23,13 +20,12 @@ export class GpioDoorbellAccessory implements AccessoryPlugin {
 
   private lastRang?: number;
 
-  private readonly doorbellMuteKey = 'homebridge-gpio-doorbell.mute';
+  private readonly doorbellMuteKey = 'homebridge-gpio-doorbell-mick111.mute';
   private doorbellMute: boolean;
-  private readonly doorbellActiveKey = 'homebridge-gpio-doorbell.active';
+  private readonly doorbellActiveKey = 'homebridge-gpio-doorbell-mick111.active';
   private doorbellActive: boolean;
   private lastPinChangeDate = Date.now(); // timestamp in ms
   private lastPinChangeValue = true; // We start with true (circuit open)
-  private lastProcessedDate = Date.now(); // timestamp in ms
   private lastProcessedValue = false;
   private timeout: NodeJS.Timeout | undefined = undefined;
 
@@ -38,7 +34,7 @@ export class GpioDoorbellAccessory implements AccessoryPlugin {
     public readonly config: AccessoryConfig,
     public readonly api: API,
   ) {
-    this.log.debug('Homebridge GPIO Doorbell loaded.');
+    this.log.debug('Homebridge GPIO Doorbell Mick111 loaded.');
 
     // init storage
     const cacheDir = this.api.user.persistPath();
@@ -48,7 +44,7 @@ export class GpioDoorbellAccessory implements AccessoryPlugin {
     // add accessory information
     this.informationService = new this.api.hap.Service.AccessoryInformation()
       .setCharacteristic(this.api.hap.Characteristic.Manufacturer, 'Homebridge')
-      .setCharacteristic(this.api.hap.Characteristic.Model, 'GPIO Doorbell');
+      .setCharacteristic(this.api.hap.Characteristic.Model, 'GPIO Doorbell Mick111');
 
     // create new doorbell accessory
     this.doorbellService = new this.api.hap.Service.Doorbell(this.config.name);
@@ -68,7 +64,7 @@ export class GpioDoorbellAccessory implements AccessoryPlugin {
     }
 
     // setup activation characteristic
-    this.activationService = new this.api.hap.Service.Switch(this.config.name);
+    this.activationService = new this.api.hap.Service.Switch(`${this.config.name} activation`);
     this.activationCharacteristic = this.activationService.getCharacteristic(
       this.api.hap.Characteristic.On,
     );
@@ -98,19 +94,6 @@ export class GpioDoorbellAccessory implements AccessoryPlugin {
 
   getServices() {
     return [this.informationService, this.doorbellService, this.activationService];
-  }
-
-  read(channel: number): boolean | undefined {
-    let value: boolean | undefined;
-    readPromise(channel)
-      .then(val => {
-        value = val;
-      })
-      .catch(err => {
-        this.log.error(err);
-        value = undefined;
-      });
-    return value;
   }
 
   setupGpio(): void {
@@ -145,8 +128,11 @@ export class GpioDoorbellAccessory implements AccessoryPlugin {
     // If a change has been observed before scheduled call has been invoked, it will do nothing, and a new
     // call will be scheduled.
     if (this.timeout !== undefined) {
-      //this.log.debug('Cancelling TO');
+      this.log.debug('Cancelling Timeout.');
+      clearTimeout(this.timeout);
+      this.timeout = undefined;
     }
+
     this.timeout = setTimeout(
       (gpioPin, changeTimeStamp) => {
         this.log.debug(`Process Pin Change -- ${changeTimeStamp}.`);
@@ -170,7 +156,6 @@ export class GpioDoorbellAccessory implements AccessoryPlugin {
 
         this.log.debug(`ACCEPT with value ${this.lastPinChangeValue}.`);
         this.lastProcessedValue = this.lastPinChangeValue;
-        this.lastProcessedDate = changeTimeStamp;
 
         let buttonPushed = !this.lastPinChangeValue;
 
