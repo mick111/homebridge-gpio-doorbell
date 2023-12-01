@@ -134,6 +134,7 @@ export class GpioDoorbellAccessory implements AccessoryPlugin {
     circuitOpen: boolean,
   ): Promise<void> {
     // We get the date of the last pin change
+    this.lastPinChangeDate = Date.now();
     this.log.debug(
       `Pin ${gpioPin}: ${this.lastPinChangeValue} -> ${circuitOpen}.` +
         ` processChange(${this.lastPinChangeDate}) in 100ms`,
