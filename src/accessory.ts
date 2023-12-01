@@ -146,17 +146,17 @@ export class GpioDoorbellAccessory implements AccessoryPlugin {
     // If a change has been observed before scheduled call has been invoked, it will do nothing, and a new
     // call will be scheduled.
     if (this.timeout !== undefined) {
-      this.log.debug('Cancelling TO');
+      //this.log.debug('Cancelling TO');
     }
     this.timeout = setTimeout(
       (gpioPin, changeTimeStamp) => {
-        this.log.debug(`Process Change: ${changeTimeStamp}.`);
+        this.log.debug(`Process Pin Change -- ${changeTimeStamp}.`);
 
         // Is it the last change?
         if (this.lastPinChangeDate !== changeTimeStamp) {
           // Ignore if it is not the change identifier: there has been other pin changes in the while.
           this.log.debug(
-            `Ignore processing because ${changeTimeStamp} is not the last change processing request ${this.lastPinChangeDate}.`,
+            `IGNORE because ${changeTimeStamp} is not the last change processing request ${this.lastPinChangeDate}.`,
           );
           return;
         }
@@ -164,11 +164,12 @@ export class GpioDoorbellAccessory implements AccessoryPlugin {
         // Is it an actual change?
         if (this.lastProcessedValue !== this.lastPinChangeValue) {
           this.log.debug(
-            `Ignore Processing pin value ${this.lastPinChangeValue} is the same as last processed value ${this.lastProcessedValue}.`,
+            `IGNORE because pin change ${this.lastPinChangeValue} is the same as last processed value ${this.lastProcessedValue}.`,
           );
           return;
         }
 
+        this.log.debug(`ACCEPT with value ${this.lastPinChangeValue}.`);
         this.lastProcessedValue = this.lastPinChangeValue;
         this.lastProcessedDate = changeTimeStamp;
 
@@ -189,6 +190,7 @@ export class GpioDoorbellAccessory implements AccessoryPlugin {
           GPIO.write(this.config.outputGpioPin, buttonPushed);
         }
 
+        this.log.debug(`Button Pushed? ${buttonPushed}.`);
         if (buttonPushed) {
           // handle throttle time
           const now = Date.now();
@@ -197,7 +199,7 @@ export class GpioDoorbellAccessory implements AccessoryPlugin {
             this.lastRang + this.config.throttleTime >= now
           ) {
             this.log.debug(
-              `Ignoring state change on pin ${gpioPin} because throttle time has not expired.`,
+              `IGNORE state change on pin ${gpioPin} because throttle time has not expired.`,
             );
             return;
           } else {
