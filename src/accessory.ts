@@ -265,7 +265,7 @@ export class GpioDoorbellAccessory implements AccessoryPlugin {
     this.log.debug(`Set activated to ${value}.`);
 
     this.doorbellActive = value;
-    this.storage.setItemSync(this.doorbellMuteKey, this.doorbellActive);
+    this.storage.setItemSync(this.doorbellActiveKey, this.doorbellActive);
   }
 
   private handleActivationGet(): boolean {
