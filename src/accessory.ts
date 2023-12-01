@@ -28,7 +28,7 @@ export class GpioDoorbellAccessory implements AccessoryPlugin {
   private readonly doorbellActiveKey = 'homebridge-gpio-doorbell.active';
   private doorbellActive: boolean;
   private lastPinChangeDate = Date.now(); // timestamp in ms
-  private lastPinChangeValue = false;
+  private lastPinChangeValue = true; // We start with true (circuit open)
   private lastProcessedDate = Date.now(); // timestamp in ms
   private lastProcessedValue = false;
   private timeout: NodeJS.Timeout | undefined = undefined;
