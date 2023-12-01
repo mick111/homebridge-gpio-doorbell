@@ -23,8 +23,11 @@ export class GpioDoorbellAccessory implements AccessoryPlugin {
 
   private readonly doorbellMuteKey = 'homebridge-gpio-doorbell.mute';
   private doorbellMute: boolean;
-  private lastPinChangeDate?: number;
-  private currentPinValue?: boolean;
+  private lastPinChangeDate = Date.now(); // timestamp in ms
+  private lastPinChangeValue = false;
+  private lastProcessedDate = Date.now(); // timestamp in ms
+  private lastProcessedValue = false;
+  private timeout: NodeJS.Timeout | undefined = undefined;
 
   constructor(
     public readonly log: Logger,
@@ -92,7 +95,6 @@ export class GpioDoorbellAccessory implements AccessoryPlugin {
   setupGpio(): void {
     GPIO.on('change', (channel, value) => this.handlePinChange(channel, value));
     GPIO.setup(this.config.gpioPin, GPIO.DIR_IN, GPIO.EDGE_BOTH);
-    this.currentPinValue = this.read(this.config.gpioPin);
 
     if (this.config.enableOutput) {
       this.log.debug(`Enable output on pin ${this.config.outputGpioPin}`);
@@ -111,39 +113,44 @@ export class GpioDoorbellAccessory implements AccessoryPlugin {
     circuitOpen: boolean,
   ): Promise<void> {
     // We get the date of the last pin change
-    this.lastPinChangeDate = Date.now();
-
     this.log.debug(
-      `Pin ${gpioPin} changed state to ${circuitOpen}.` +
-        ` Invoking in a 100ms processChange with identifier ${this.lastPinChangeDate}`,
+      `Pin ${gpioPin}: ${this.lastPinChangeValue} -> ${circuitOpen}.` +
+        ` processChange(${this.lastPinChangeDate}) in 100ms`,
     );
+    this.lastPinChangeDate = Date.now();
+    this.lastPinChangeValue = circuitOpen;
 
     // To prevent glitches, we make delayed call with a change identifier (based on timestamp)
     // If a change has been observed before scheduled call has been invoked, it will do nothing, and a new
     // call will be scheduled.
-    setTimeout(
+    if (this.timeout !== undefined) {
+      this.log.debug('Cancelling TO');
+    }
+    this.timeout = setTimeout(
       (gpioPin, changeTimeStamp) => {
+        this.log.debug(`Process Change: ${changeTimeStamp}.`);
+
+        // Is it the last change?
         if (this.lastPinChangeDate !== changeTimeStamp) {
           // Ignore if it is not the change identifier: there has been other pin changes in the while.
           this.log.debug(
-            'Ignore processing because this is not the last change processing request.',
+            `Ignore processing because ${changeTimeStamp} is not the last change processing request ${this.lastPinChangeDate}.`,
           );
           return;
         }
 
         // Is it an actual change?
-        const currentValue = this.read(gpioPin);
-        if (currentValue === this.currentPinValue) {
+        if (this.lastProcessedValue !== this.lastPinChangeValue) {
           this.log.debug(
-            `Ignore processing because ${currentValue} does not differ from last processed value ${this.currentPinValue}.`,
+            `Ignore Processing pin value ${this.lastPinChangeValue} is the same as last processed value ${this.lastProcessedValue}.`,
           );
           return;
         }
 
-        // We can process the change
-        this.currentPinValue = currentValue;
+        this.lastProcessedValue = this.lastPinChangeValue;
+        this.lastProcessedDate = changeTimeStamp;
 
-        let buttonPushed = !currentValue;
+        let buttonPushed = !this.lastPinChangeValue;
 
         if (this.config.negateInput) {
           buttonPushed = !buttonPushed;
