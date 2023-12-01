@@ -161,7 +161,7 @@ export class GpioDoorbellAccessory implements AccessoryPlugin {
         }
 
         // Is it an actual change?
-        if (this.lastProcessedValue !== this.lastPinChangeValue) {
+        if (this.lastProcessedValue === this.lastPinChangeValue) {
           this.log.debug(
             `IGNORE because pin change ${this.lastPinChangeValue} is the same as last processed value ${this.lastProcessedValue}.`,
           );
