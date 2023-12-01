@@ -17,12 +17,16 @@ export class GpioDoorbellAccessory implements AccessoryPlugin {
 
   private informationService;
   private doorbellService;
+  private activationService;
   private muteCharacteristic;
+  private activationCharacteristic;
 
   private lastRang?: number;
 
   private readonly doorbellMuteKey = 'homebridge-gpio-doorbell.mute';
   private doorbellMute: boolean;
+  private readonly doorbellActiveKey = 'homebridge-gpio-doorbell.active';
+  private doorbellActive: boolean;
   private lastPinChangeDate = Date.now(); // timestamp in ms
   private lastPinChangeValue = false;
   private lastProcessedDate = Date.now(); // timestamp in ms
@@ -63,12 +67,29 @@ export class GpioDoorbellAccessory implements AccessoryPlugin {
       this.muteCharacteristic.onSet(this.handleMuteSet.bind(this));
     }
 
-    // restore persisted settings
+    // setup activation characteristic
+    this.activationService = new this.api.hap.Service.Switch(this.config.name);
+    this.activationCharacteristic = this.activationService.getCharacteristic(
+      this.api.hap.Characteristic.On,
+    );
+    this.activationCharacteristic.onGet(this.handleActivationGet.bind(this));
+    this.activationCharacteristic.onSet(this.handleActivationSet.bind(this));
+
+
+    // restore persisted settings for mute
     this.doorbellMute = this.storage.getItemSync(this.doorbellMuteKey) || false;
     this.storage.setItemSync(this.doorbellMuteKey, this.doorbellMute);
     this.doorbellService.updateCharacteristic(
       this.api.hap.Characteristic.Mute,
       this.doorbellMute as boolean,
+    );
+
+    // restore persisted settings for activation
+    this.doorbellActive = this.storage.getItemSync(this.doorbellActiveKey) || false;
+    this.storage.setItemSync(this.doorbellActiveKey, this.doorbellActive);
+    this.activationService.updateCharacteristic(
+      this.api.hap.Characteristic.On,
+      this.doorbellActive as boolean,
     );
 
     // setup gpio
@@ -185,29 +206,33 @@ export class GpioDoorbellAccessory implements AccessoryPlugin {
           // forward ring to homekit
           this.log.info(`Doorbell "${this.config.name}" rang.`);
 
-          if (!this.config.enableHttpTrigger || !this.config.httpTriggerUrl) {
-            // ring in homekit
-            this.log.info('Forwarding ring directly to HomeKit.');
-            //this.doorbellService.updateCharacteristic(
-            //  this.api.hap.Characteristic.ProgrammableSwitchEvent,
-            //  this.api.hap.Characteristic.ProgrammableSwitchEvent.SINGLE_PRESS,
-            //);
+          if (!this.doorbellActive) {
+            this.log.info('But it is not active.');
           } else {
-            // ring via 3rd party plugin
-            const url = this.config.httpTriggerUrl;
-            this.log.info(`Performing request to webhook at ${url}.`);
-            try {
-              axios.get(url);
-              /* eslint-disable  @typescript-eslint/no-explicit-any */
-            } catch (e: any) {
-              if (e.response) {
-                this.log.error(
-                  `Request to webhook failed with status code ${e.response.status}: ${e.response.data}`,
-                );
-              } else {
-                this.log.error(
-                  `Request to webhook failed with message: ${e?.message}`,
-                );
+            if (!this.config.enableHttpTrigger || !this.config.httpTriggerUrl) {
+              // ring in homekit
+              this.log.info('Forwarding ring directly to HomeKit.');
+              this.doorbellService.updateCharacteristic(
+                this.api.hap.Characteristic.ProgrammableSwitchEvent,
+                this.api.hap.Characteristic.ProgrammableSwitchEvent.SINGLE_PRESS,
+              );
+            } else {
+              // ring via 3rd party plugin
+              const url = this.config.httpTriggerUrl;
+              this.log.info(`Performing request to webhook at ${url}.`);
+              try {
+                axios.get(url);
+                /* eslint-disable  @typescript-eslint/no-explicit-any */
+              } catch (e: any) {
+                if (e.response) {
+                  this.log.error(
+                    `Request to webhook failed with status code ${e.response.status}: ${e.response.data}`,
+                  );
+                } else {
+                  this.log.error(
+                    `Request to webhook failed with message: ${e?.message}`,
+                  );
+                }
               }
             }
           }
@@ -233,5 +258,17 @@ export class GpioDoorbellAccessory implements AccessoryPlugin {
   private handleMuteGet(): boolean {
     this.log.debug('Get mute.');
     return this.doorbellMute;
+  }
+
+  private handleActivationSet(value: boolean): void {
+    this.log.debug(`Set activated to ${value}.`);
+
+    this.doorbellActive = value;
+    this.storage.setItemSync(this.doorbellMuteKey, this.doorbellActive);
+  }
+
+  private handleActivationGet(): boolean {
+    this.log.debug('Get activated.');
+    return this.doorbellActive;
   }
 }
