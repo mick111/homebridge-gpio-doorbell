@@ -97,7 +97,7 @@ export class GpioDoorbellAccessory implements AccessoryPlugin {
   }
 
   getServices() {
-    return [this.informationService, this.doorbellService];
+    return [this.informationService, this.doorbellService, this.activationService];
   }
 
   read(channel: number): boolean | undefined {
