@@ -139,7 +139,6 @@ export class GpioDoorbellAccessory implements AccessoryPlugin {
       `Pin ${gpioPin}: ${this.lastPinChangeValue} -> ${circuitOpen}.` +
         ` processChange(${this.lastPinChangeDate}) in 100ms`,
     );
-    this.lastPinChangeDate = Date.now();
     this.lastPinChangeValue = circuitOpen;
 
     // To prevent glitches, we make delayed call with a change identifier (based on timestamp)
@@ -180,7 +179,7 @@ export class GpioDoorbellAccessory implements AccessoryPlugin {
         }
 
         // handle GPIO output
-        if (this.config.enableOutput && !this.doorbellMute) {
+        if (this.config.enableOutput && !this.doorbellMute && this.doorbellActive) {
           this.log.debug(
             `Setting GPIO pin ${this.config.outputGpioPin} to ${
               buttonPushed ? 'HIGH' : 'LOW'
@@ -206,21 +205,20 @@ export class GpioDoorbellAccessory implements AccessoryPlugin {
             this.lastRang = Date.now();
           }
 
-          // forward ring to homekit
           this.log.info(`Doorbell "${this.config.name}" rang.`);
 
           if (!this.doorbellActive) {
             this.log.info('But it is not active.');
           } else {
-            if (!this.config.enableHttpTrigger || !this.config.httpTriggerUrl) {
-              // ring in homekit
-              this.log.info('Forwarding ring directly to HomeKit.');
-              this.doorbellService.updateCharacteristic(
-                this.api.hap.Characteristic.ProgrammableSwitchEvent,
-                this.api.hap.Characteristic.ProgrammableSwitchEvent.SINGLE_PRESS,
-              );
-            } else {
-              // ring via 3rd party plugin
+            // Forward ring.
+            // In homekit
+            this.log.info('Forwarding ring directly to HomeKit.');
+            this.doorbellService.updateCharacteristic(
+              this.api.hap.Characteristic.ProgrammableSwitchEvent,
+              this.api.hap.Characteristic.ProgrammableSwitchEvent.SINGLE_PRESS,
+            );
+            // Via 3rd party plugin as well
+            if (this.config.enableHttpTrigger && this.config.httpTriggerUrl) {
               const url = this.config.httpTriggerUrl;
               this.log.info(`Performing request to webhook at ${url}.`);
               try {
